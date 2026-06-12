@@ -1,0 +1,6 @@
+data/
+.git/
+.server.log
+.server.pid
+.server.port
+node_modules/
