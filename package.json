@@ -1,0 +1,14 @@
+{
+  "name": "text-gist-service",
+  "version": "1.0.0",
+  "description": "A tiny editable text hosting service with user accounts and stable raw text links.",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "smoke": "node scripts/smoke-test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
