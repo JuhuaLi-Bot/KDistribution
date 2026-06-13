@@ -16,6 +16,12 @@ function cookieFrom(response) {
   return value.split(';')[0];
 }
 
+function csrfFrom(html) {
+  const csrf = html.match(/name="csrf" value="([^"]+)"/)?.[1];
+  assert.ok(csrf, 'page should include csrf token');
+  return csrf;
+}
+
 async function main() {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'text-gist-service-'));
   const server = createServer({ dataDir, host: '127.0.0.1', port: 0 });
@@ -29,6 +35,22 @@ async function main() {
     assert.equal(health.status, 200);
     assert.equal(await health.text(), 'ok\n');
 
+    const adminCredentials = await fs.readFile(path.join(dataDir, 'admin-credentials.txt'), 'utf8');
+    const adminPassword = adminCredentials.match(/^password=(.+)$/m)?.[1];
+    assert.ok(adminPassword, 'startup should create random admin password');
+    const adminLogin = await fetch(`${baseUrl}/login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formBody({ username: 'admin', password: adminPassword }),
+    });
+    assert.equal(adminLogin.status, 303);
+    const adminCookie = cookieFrom(adminLogin);
+
+    const adminPage = await fetch(`${baseUrl}/admin`, { headers: { Cookie: adminCookie } });
+    assert.equal(adminPage.status, 200);
+    const adminCsrf = csrfFrom(await adminPage.text());
+
     const register = await fetch(`${baseUrl}/register`, {
       method: 'POST',
       redirect: 'manual',
@@ -41,8 +63,7 @@ async function main() {
     const dashboard = await fetch(`${baseUrl}/`, { headers: { Cookie: cookie } });
     assert.equal(dashboard.status, 200);
     const dashboardHtml = await dashboard.text();
-    const csrf = dashboardHtml.match(/name="csrf" value="([^"]+)"/)?.[1];
-    assert.ok(csrf, 'dashboard should include csrf token');
+    const csrf = csrfFrom(dashboardHtml);
 
     const create = await fetch(`${baseUrl}/gists`, {
       method: 'POST',
@@ -79,6 +100,73 @@ async function main() {
 
     const publicView = await fetch(`${baseUrl}/gists/${id}`);
     assert.equal(publicView.status, 200);
+
+    const accountPage = await fetch(`${baseUrl}/account`, { headers: { Cookie: cookie } });
+    assert.equal(accountPage.status, 200);
+    const accountCsrf = csrfFrom(await accountPage.text());
+    const changePassword = await fetch(`${baseUrl}/account/password`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        Cookie: cookie,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formBody({
+        csrf: accountCsrf,
+        currentPassword: 'correct horse battery staple',
+        newPassword: 'new correct horse battery staple',
+        confirmPassword: 'new correct horse battery staple',
+      }),
+    });
+    assert.equal(changePassword.status, 303);
+
+    const relogin = await fetch(`${baseUrl}/login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formBody({ username: 'alice', password: 'new correct horse battery staple' }),
+    });
+    assert.equal(relogin.status, 303);
+    assert.ok(cookieFrom(relogin));
+
+    const closeRegistration = await fetch(`${baseUrl}/admin/settings`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        Cookie: adminCookie,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formBody({ csrf: adminCsrf, allowRegistration: 'false' }),
+    });
+    assert.equal(closeRegistration.status, 303);
+
+    const blockedRegister = await fetch(`${baseUrl}/register`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formBody({ username: 'blocked', password: 'blocked password' }),
+    });
+    assert.equal(blockedRegister.status, 303);
+    assert.match(blockedRegister.headers.get('location'), /registration_is_closed/);
+
+    const createManagedUser = await fetch(`${baseUrl}/admin/users`, {
+      method: 'POST',
+      headers: {
+        Cookie: adminCookie,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formBody({ csrf: adminCsrf, username: 'bob', password: 'managed user password' }),
+    });
+    assert.equal(createManagedUser.status, 200);
+    assert.match(await createManagedUser.text(), /Created bob/);
+
+    const bobLogin = await fetch(`${baseUrl}/login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formBody({ username: 'bob', password: 'managed user password' }),
+    });
+    assert.equal(bobLogin.status, 303);
 
     console.log(`smoke test passed: ${baseUrl}/raw/${id}`);
   } finally {
