@@ -11,6 +11,7 @@ This service is a single Node.js process with file-backed persistence. The only 
 - Keep `DATA_DIR` outside the source tree, for example `/var/lib/text-gist-service`.
 - Back up `DATA_DIR` regularly.
 - Do not publish or commit `DATA_DIR`; it contains users, sessions, metadata, and gist contents.
+- Save the first generated admin password from service logs or `DATA_DIR/admin-credentials.txt`, then change it in the user center.
 
 ## Environment
 
@@ -35,9 +36,12 @@ DATA_DIR=/var/lib/text-gist-service
 PUBLIC_BASE_URL=https://gist.example.com
 MAX_TEXT_BYTES=1048576
 COOKIE_SECURE=true
+ADMIN_USERNAME=admin
 ```
 
 Use `HOST=127.0.0.1` when Nginx or another reverse proxy runs on the same machine. Use `HOST=0.0.0.0` only when the process must accept direct network traffic.
+
+If no administrator exists at startup, the service creates `ADMIN_USERNAME` with a random password. It prints the password to stdout and writes a one-time copy to `DATA_DIR/admin-credentials.txt`.
 
 ## systemd
 
